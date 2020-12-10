@@ -9,6 +9,7 @@ class task:
 
     def __init__(self):
         self.loadData()
+        self.mkdirLivePlots()
 
     def loadData(self):
         rows = np.arange(1, 1051576, 2)
@@ -239,6 +240,11 @@ class task:
         plt.tight_layout()
         plt.savefig('./hourPlayers.png')
 
+    def mkdirLivePlots(self):
+        self.livePlotsPath = './livePlots/'
+        if ( os.path.exists(self.livePlotsPath) == False ):
+            os.mkdir(self.livePlotsPath)
+
     def plotLive(self):
 
         # prepare
@@ -251,71 +257,104 @@ class task:
         X = np.vstack((live, sportInd)).T
         X, Xinv = np.unique(X, axis=0, return_inverse=True)
         Y = [ bets[Xinv == inv] for inv in np.unique(Xinv) ]
-        Y = np.array(Y)
+        Ylog10 = np.array([ np.log10(y) for y in Y ], dtype=object)
 
+        # bootstrap means (with loops because of memory)
+        # ----------------------------------------------
         nBoot = 100
-        YBoot = [ np.random.choice(y, (nBoot, y.size)) for y in Y ]
+        row = np.zeros(nBoot)
+        Yboot = np.zeros((Ylog10.size, nBoot))
+        iq = (nBoot*np.array([5e-1, 5e-2, 95e-2])).astype('int')
 
-        # live or not (lon)
-        # -----------------
-        lon = [ X[ X[:,1] == iSport ][:,0] for iSport in np.unique(sportInd) ]
-        lon = [ l.tolist() for l in lon ]
+        print('\n     bootstrap means ( %d samples )     ' % nBoot)
+        print('---------------------------------------------')
+        for i in range(Yboot.shape[0]):
+            for j in range(Yboot.shape[1]):
+                row[j] = np.random.choice( Ylog10[i], Ylog10[i].size ).mean()
+            Yboot[i] = np.sort(row)
 
-        lonUni, lonInv = np.unique( lon, return_inverse=True )
-        lonStr = ['prematch', 'both', 'live'] # unique sorts it this way
-
-        print('\n     sports live/prematch')
-        print('------------------------------------')
-        for iSport in np.unique(sportInd):
-            print('%-20s %10s' % (sports[iSport], lonStr[lonInv[iSport]]))
+            # print
+            # -----
+            output = (i, X[i, 1], sports[X[i, 1]],)
+            output += ('live' if X[i, 0] else 'prematch',)
+            output += tuple(Yboot[i][iq])
+            print('%2d %2d %-20s %10s   %5.3f   ( %5.3f - %5.3f )' % output)
 
         # histograms
         # ----------
         nbin = 30
-        bins = np.logspace(0, 1, nbin)
-        # bins = 10**np.arange(0, 1+2/nbin, 1/nbin)
+        bins = np.arange(0, 1+2/nbin, 1/nbin)
 
-        ret = [ np.histogram(y, bins, density=True) for y in Y ]
-        Yhist, _ = zip(*ret)
-        Yhist = np.array(Yhist)
+        Yhist = np.array([ np.histogram(y, bins)[0] for y in Ylog10 ], dtype=object)
+        Yhist = Yhist/Yhist.sum(1, keepdims=True)
 
         # test 'live' differences
         # -----------------------
+        print('\n     ks test results     ')
+        print('------------------------------------')
+
         ksResult = np.full((sports.size, 2), np.nan)
-        chi2Result = np.full((sports.size, 2), np.nan)
-
         for iSport in range(sports.size):
-            i = X[:,1] == iSport
-            if (X[i][:,0].size > 1):
 
-                # ks test
-                # -------
-                yo = Y[i][0]
-                ym = Y[i][1]
-                score, pvalue = stats.ks_2samp(ym, yo)
+            # calc
+            # ----
+            i = X[:,1] == iSport
+            y = [ a for a, b in zip(Ylog10, i) if b ]
+            if (len(y) > 1):
+                yo = y[0]
+                ym = y[1]
+                score, pvalue = stats.ks_2samp(ym, yo, 'greater')
                 ksResult[iSport] = [score, pvalue]
 
-                # chi2 test
-                # ---------
-                yo = Yhist[i][0]
-                ym = Yhist[i][1]
-                j = (yo>0) & (ym>0)
-                score, pvalue = stats.chisquare(ym[j], yo[j])
-                chi2Result[iSport] = [score, pvalue]
+            # print
+            # -----
+            output = (sports[iSport],) + tuple(ksResult[iSport])
+            print('%-20s %5.2f (%5.2f)' % output)
 
-        # print test results
+        # remap sport categories according to means
+        # -----------------------------------------
+        l = X[:, 0]
+        s = X[:, 1]
+        m = Yboot[:, nBoot//2]
+        _, i = np.unique( X[:, 1], return_index=True )
+        snew = s[i][ m[i].argsort() ]
+        Xnew = np.array([ snew[sold] for sold in s ])
+
+        # plot bootstraped means
+        # ----------------------
+        xl = X[:, 0]
+        xs = X[:, 1]
+        ys = Yboot
+
+        _, indTick = np.unique( xs, return_index=True )
+        tt = sports[xs[indTick]]
+        xt = xs[indTick]
+
+        for i, (x, y) in enumerate(zip(xs, ys)):
+            color = 'C1' if xl[i] else 'C0'
+            colorDict = { 'color' : color }
+            props = {
+                'vert' : False,
+                'widths' : 0.4,
+                'boxprops' : { **colorDict },
+                'capprops' : { **colorDict },
+                'medianprops' : { **colorDict },
+                'whiskerprops' : { **colorDict },
+                'flierprops' : { 'marker' : '.', 'markersize' : 5, 'markerfacecolor' : color, 'markeredgecolor' : color, },
+            }
+            plt.boxplot(y, positions=[x], **props)
+            plt.plot(y[nBoot//2], x, 'ro')
+
+        plt.yticks(xt, tt)
+        plt.grid(True, axis='y', alpha=0.4, linestyle='--')
+        plt.tight_layout()
+        plt.savefig('./plotLive.png')
+        plt.clf()
+
+        return
+
+        # plot distributions
         # ------------------
-        print('\n     test results (ks & chi2)     ')
-        print('------------------------------------')
-        for i in range(sports.size):
-            output = (sports[i],) + tuple(ksResult[i]) + tuple(chi2Result[i])
-            print('%-20s    %5.2f (%5.2f)   %5.2f (%5.2f)' % output)
-
-        # plot
-        # ----
-        os.mkdir('./livePlots')
-        xo = bins[:-1]+np.diff(xo)
-
         for iSport in range(sports.size):
 
             # prepare
@@ -324,12 +363,11 @@ class task:
             i = X[:,1] == iSport
             isLive = X[i][:,0]
 
-            # plot pdfs
+            # plot hist
             # ---------
             plt.subplot(121)
 
-            hp = plt.step(xo, Yhist[i].T)
-            plt.xscale('log')
+            hp = plt.step(bins[:-1], Yhist[i].T)
 
             if ( isLive.size > 1 ):
                 plt.legend(['prematch', 'live'])
@@ -341,28 +379,37 @@ class task:
                     hp[0].set_color('C0')
                     plt.legend([ 'prematch' ])
 
-            plt.title("bet_odd PDF for '%s'" % sports[iSport])
-            plt.xlabel('bet_odd [-]')
-            plt.ylabel('PDF')
+            plt.title("%s" % sports[iSport])
+            plt.xlabel('$log_{10}$(bet_odd)')
+            plt.ylabel('rel. frequency')
+            plt.xlim(0, 1)
+            plt.ylim(0, 0.4)
+            plt.xticks(np.arange(0, 1.1, .25))
+            plt.yticks(np.arange(0, 0.41, 0.1))
 
-            # plot residuals
-            # --------------
+            # plot cdf
+            # --------
             plt.subplot(122)
-            mu = np.array([ np.mean(y, axis=1) for y in YBoot if i ])
-            plt.plot(mu)
+            xp = [ np.sort(y) for y in Ylog10[i] ]
+            yp = [ np.linspace(0, 1, x.size) for x in xp ]
+            for x, y in zip(xp, yp):
+                hp = plt.plot(x, y)
 
-            # if ( isLive[0] == 1 ):
-            #     hr[0].set_color('C1')
+            if ( isLive[0] == 1 ):
+                hp[0].set_color('C1')
 
-            # plt.title('model fit residuals')
-            # plt.xlabel('Z$_{fit}$ [-]')
-            # plt.xticks(np.arange(-3, 3.1))
-            # plt.xlim(xn.min(), xn.max())
+            plt.title("%s" % sports[iSport])
+            plt.xlabel('$log_{10}$(bet_odd)')
+            plt.ylabel('CDF')
+            plt.xlim(0, 1)
+            plt.ylim(0, 1)
+            plt.xticks(np.arange(0, 1.1, .25))
+            plt.yticks(np.arange(0, 1.1, .25))
 
             # print
             # -----
             plt.tight_layout()
-            fig.savefig('./livePlots/%s.png' % sports[iSport].replace(' ', '_'))
+            fig.savefig(self.livePlotsPath + '%s.png' % sports[iSport].replace(' ', '_'))
             plt.clf()
 
 def main():
@@ -375,4 +422,5 @@ def main():
     return t
 
 if __name__ == '__main__':
+    np.warnings.filterwarnings('error', category=np.VisibleDeprecationWarning)
     t = main()
