@@ -4,17 +4,25 @@ import matplotlib.pyplot as plt
 import numpy as np
 import os
 import pandas as pd
+import prince
+import sys
+
+np.warnings.filterwarnings('error', category=np.VisibleDeprecationWarning)
 
 class task:
 
-    def __init__(self):
-        self.loadData()
-        self.mkdirLivePlots()
+    def __init__(self, skiprows=False):
+        self.loadData(skiprows)
+        self.mkdirPlots()
 
-    def loadData(self):
-        rows = np.arange(1, 1051576, 2)
-        # rows = None
+    def loadData(self, skiprows):
+        rows = np.arange(1, 1051576, 2) if skiprows else None
         self.df = pd.read_csv('./data.csv', skiprows=rows)
+
+    def mkdirPlots(self):
+        self.plotPath = './plots/'
+        if ( os.path.exists(self.plotPath) == False ):
+            os.mkdir(self.plotPath)
 
     def plotHist(self):
 
@@ -69,15 +77,15 @@ class task:
         plt.grid(True, axis='x')
         plt.title('Fraction of total bets by sport')
         plt.xlabel('Fraction [%]')
-        plt.xlim(0, 100)
         plt.xticks(np.arange(0, 101, 25))
         plt.yticks(y, sport[ind])
-        plt.ylim(y.mean(), y.max()+1)
+        plt.ylim(y.mean()+2, y.max()+1)
+        plt.xlim(0, 100)
 
         # print & close
         # -------------
         plt.tight_layout()
-        plt.savefig('./sport.png')
+        plt.savefig(self.plotPath + 'sport.png')
         plt.close()
 
     def plotNoot(self):
@@ -124,17 +132,18 @@ class task:
 
         plt.grid(True, axis='both')
         plt.legend(['$ bet_{nogomet|player} $', '$ bet_{nogomet|total} $', ])
-        plt.title("Fraction of 'nogomet' bets ECDF")
-        plt.xlabel('Fraction [%]')
-        plt.xlim(0, 100)
+        plt.title("Fraction of 'nogomet' bets")
+        plt.yticks(np.arange(0, 3e4, 5e3))
         plt.xticks(np.arange(0, 101, 25))
         plt.ylabel('Player number [-]')
+        plt.xlabel('Fraction [%]')
         plt.ylim(0, nPlayer)
-        plt.yticks(np.arange(0, 3e4, 5e3))
+        plt.xlim(0, 100)
 
         # print & close
         # -------------
-        plt.savefig('./noot.png')
+        plt.tight_layout()
+        plt.savefig(self.plotPath + 'noot.png')
         plt.close()
 
     def plotHourBets(self):
@@ -179,7 +188,7 @@ class task:
         # print
         # -----
         plt.tight_layout()
-        plt.savefig('./hourBets.png')
+        plt.savefig(self.plotPath + 'hourBets.png')
         plt.close()
 
     def plotHourPlayers(self):
@@ -205,7 +214,7 @@ class task:
         # sportHours
         # ----------
         bins = np.arange(24)
-        sportHours = [ h[ s == sVal ] for sVal in np.unique(s) ]
+        sportHours = np.array( [ h[ s == sVal ] for sVal in np.unique(s) ], dtype=object )
         ret = [ np.histogram( sHours, bins ) for sHours in sportHours ]
         playerCounts, _ = zip(*ret)
         playerCounts = np.array(playerCounts)
@@ -225,27 +234,24 @@ class task:
         i = np.argsort(playerArgmax)
         y = np.arange(sports.size)
 
-        plt.boxplot(np.array(sportHours)[i], sym='', vert=False)
-        h = plt.plot(playerArgmax[i]+0.5, y+1, 'ro')
+        hp = plt.plot(playerArgmax[i], y+1, 'd', markersize=7, color='red')
+        hb = plt.boxplot(sportHours[i], vert=False, widths=0.4, flierprops={ 'markersize' : 2 })
 
-        plt.legend( h, ['Max. player/hour'], fontsize='large', framealpha=1)
         plt.title('Players per hour')
+        plt.legend( [hp[0], hb['fliers'][0]], ['Max. player/hour', 'outliers'], framealpha=1, loc='upper left')
+        plt.grid(True, axis='both', alpha=0.5, linestyle='--')
         plt.xlabel('Time of day [hour]')
-        plt.xlim(0, 24)
         plt.xticks(np.arange(0, 25, 6))
         plt.yticks(y+1, sports[i])
+        # plt.xlim(-0.5, 24)
 
         # print
         # -----
         plt.tight_layout()
-        plt.savefig('./hourPlayers.png')
+        plt.savefig(self.plotPath + 'hourPlayers.png')
+        plt.close()
 
-    def mkdirLivePlots(self):
-        self.livePlotsPath = './livePlots/'
-        if ( os.path.exists(self.livePlotsPath) == False ):
-            os.mkdir(self.livePlotsPath)
-
-    def plotLive(self):
+    def plotLive(self, nBoot=100):
 
         # prepare
         # -------
@@ -261,7 +267,6 @@ class task:
 
         # bootstrap means (with loops because of memory)
         # ----------------------------------------------
-        nBoot = 100
         row = np.zeros(nBoot)
         Yboot = np.zeros((Ylog10.size, nBoot))
         iq = (nBoot*np.array([5e-1, 5e-2, 95e-2])).astype('int')
@@ -278,7 +283,7 @@ class task:
             output = (i, X[i, 1], sports[X[i, 1]],)
             output += ('live' if X[i, 0] else 'prematch',)
             output += tuple(Yboot[i][iq])
-            print('%2d %2d %-20s %10s   %5.3f   ( %5.3f - %5.3f )' % output)
+            print('%2d  %2d  %-20s %10s   %5.3f   ( %5.3f - %5.3f )' % output)
 
         # histograms
         # ----------
@@ -311,47 +316,53 @@ class task:
             output = (sports[iSport],) + tuple(ksResult[iSport])
             print('%-20s %5.2f (%5.2f)' % output)
 
-        # remap sport categories according to means
-        # -----------------------------------------
-        l = X[:, 0]
-        s = X[:, 1]
-        m = Yboot[:, nBoot//2]
-        _, i = np.unique( X[:, 1], return_index=True )
-        snew = s[i][ m[i].argsort() ]
-        Xnew = np.array([ snew[sold] for sold in s ])
+        # remap old sport categories (sold) based on the mean
+        # ---------------------------------------------------
+        sold = X[:, 1]
+        mean = Yboot[:, nBoot//2]
+        _, i = np.unique( sold, return_index=True )
+        j = mean[i].argsort()
+        cnew = sold[i][j].tolist()
+        X[:, 1] = np.array([ cnew.index(cold) for cold in sold ])
+        ksResult = ksResult[cnew]
+        sports = sports[cnew]
 
         # plot bootstraped means
         # ----------------------
         xl = X[:, 0]
         xs = X[:, 1]
-        ys = Yboot
+        ys = Yboot[:]
 
         _, indTick = np.unique( xs, return_index=True )
-        tt = sports[xs[indTick]]
         xt = xs[indTick]
+        tt = sports[xt]
 
         for i, (x, y) in enumerate(zip(xs, ys)):
             color = 'C1' if xl[i] else 'C0'
             colorDict = { 'color' : color }
             props = {
                 'vert' : False,
-                'widths' : 0.4,
+                'widths' : 0.25,
                 'boxprops' : { **colorDict },
                 'capprops' : { **colorDict },
                 'medianprops' : { **colorDict },
                 'whiskerprops' : { **colorDict },
-                'flierprops' : { 'marker' : '.', 'markersize' : 5, 'markerfacecolor' : color, 'markeredgecolor' : color, },
+                'flierprops' : { 'marker' : '.', 'markersize' : 3, 'markerfacecolor' : color, 'markeredgecolor' : color, },
             }
             plt.boxplot(y, positions=[x], **props)
-            plt.plot(y[nBoot//2], x, 'ro')
 
         plt.yticks(xt, tt)
-        plt.grid(True, axis='y', alpha=0.4, linestyle='--')
-        plt.tight_layout()
-        plt.savefig('./plotLive.png')
-        plt.clf()
+        plt.xlabel('$log_{10}$(bet_odd)')
+        plt.xticks(np.arange(0, 0.81, 0.2))
+        plt.title('bootstrapped mean ( %d samples )' % nBoot)
+        plt.grid(True, axis='both', alpha=0.5, linestyle='--')
 
-        return
+        hl = plt.gca().lines
+        plt.legend([hl[0], hl[-3]], ['prematch', 'live'])
+
+        plt.tight_layout()
+        plt.savefig(self.plotPath + 'live.png')
+        plt.clf()
 
         # plot distributions
         # ------------------
@@ -409,18 +420,105 @@ class task:
             # print
             # -----
             plt.tight_layout()
-            fig.savefig(self.livePlotsPath + '%s.png' % sports[iSport].replace(' ', '_'))
+            fig.savefig(self.plotPath + 'live_%s.png' % sports[iSport].replace(' ', '_'))
             plt.clf()
 
+    def plotGroups(self):
+
+        # df
+        # --
+        columns = [
+            'bet_odd',
+            'slip_odd',
+            'bet_type',
+        ]
+        data = self.df[columns]
+        index = self.df.player_id
+        X = pd.DataFrame(data=data, index=index, columns=columns)
+
+        # insert hour
+        # -----------
+        date = pd.DatetimeIndex(self.df.date)
+        X['hour'] = date.hour
+
+        # boxcox odds
+        # -----------
+        X.bet_odd, betLambda = stats.boxcox(X.bet_odd)
+        X.slip_odd, slipLambda = stats.boxcox(X.slip_odd)
+
+        # zscore
+        # ------
+        for col in X.columns:
+            if ( X[col].dtype != 'object' ):
+                X[col] = stats.zscore( X[col] )
+
+        # prince
+        # ------
+        famd = prince.FAMD(
+            n_components=X.columns.size,
+            n_iter=3,
+            copy=True,
+            check_input=True,
+            engine='auto',
+        )
+        famd = famd.fit(X)
+
+        # group
+        # -----
+
+        # plot correlation & inertia contribution
+        # ---------------------------------------
+        fig = plt.figure(figsize=(8, 4))
+
+        r2 = famd.column_correlations(X)
+        inert = famd.explained_inertia_*100
+
+        plt.subplot(121)
+        u = r2[0]
+        v = r2[1]
+        plt.quiver(u*0, v*0, u, v, angles='xy', scale_units='xy', scale=1, width=3e-3, headwidth=7)
+        for i, t in enumerate(r2.index):
+            plt.text(u[i], v[i], t)
+
+        plt.xlim(-1, 1)
+        plt.ylim(-1, 1)
+        plt.xticks(np.arange(-1, 1.1, 0.5))
+        plt.yticks(np.arange(-1, 1.1, 0.5))
+        plt.grid(True, axis='both', alpha=0.5, linestyle='--')
+        plt.xlabel('Component 0 ( %0.2f %% )' % (inert[0]))
+        plt.ylabel('Component 1 ( %0.2f %% )' % (inert[1]))
+        plt.title('Variable correlation')
+
+        plt.subplot(122)
+        plt.bar(np.arange(inert.size), inert)
+
+        plt.xticks(np.arange(inert.size))
+        plt.title('Inertia explained')
+        plt.xlabel('Component')
+        plt.ylabel('%')
+
+        plt.tight_layout()
+        plt.savefig('./famd.png')
+        plt.close()
+
+        # return
+        # ------
+        return famd, X
+
 def main():
+
     plt.clf()
-    t = task()
+    nBoot = 100
+    skiprows = True
+
+    t = task(skiprows=skiprows)
     # t.plotSport()
     # t.plotNoot()
     # t.plotHourPlayers()
-    t.plotLive()
-    return t
+    # t.plotLive(nBoot=nBoot)
+    famd, X = t.plotGroups()
+
+    return t, famd, X
 
 if __name__ == '__main__':
-    np.warnings.filterwarnings('error', category=np.VisibleDeprecationWarning)
-    t = main()
+    t, famd, X = main()
