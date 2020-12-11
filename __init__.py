@@ -1,4 +1,3 @@
-from scipy import stats
 import matplotlib
 import matplotlib.pyplot as plt
 import numpy as np
@@ -6,6 +5,9 @@ import os
 import pandas as pd
 import prince
 import sys
+
+from scipy import stats
+from sklearn.cluster import KMeans
 
 np.warnings.filterwarnings('error', category=np.VisibleDeprecationWarning)
 
@@ -132,7 +134,7 @@ class task:
 
         plt.grid(True, axis='both')
         plt.legend(['$ bet_{nogomet|player} $', '$ bet_{nogomet|total} $', ])
-        plt.title("Fraction of 'nogomet' bets")
+        plt.title("Fraction of each player's 'nogomet' bets")
         plt.yticks(np.arange(0, 3e4, 5e3))
         plt.xticks(np.arange(0, 101, 25))
         plt.ylabel('Player number [-]')
@@ -427,67 +429,63 @@ class task:
 
         # df
         # --
-        columns = [
-            'bet_odd',
-            'slip_odd',
-            'bet_type',
-        ]
-        data = self.df[columns]
-        index = self.df.player_id
-        X = pd.DataFrame(data=data, index=index, columns=columns)
+        cols = ['player_id', 'bet_type', 'sport', 'bet_odd', 'slip_odd']
+        df = self.df[cols].copy()
 
-        # insert hour
-        # -----------
-        date = pd.DatetimeIndex(self.df.date)
-        X['hour'] = date.hour
+        # boxcox & scale odds
+        # -------------------
+        betBox, _ = stats.boxcox( df.bet_odd )
+        slipBox, _ = stats.boxcox( df.slip_odd )
 
-        # boxcox odds
-        # -----------
-        X.bet_odd, betLambda = stats.boxcox(X.bet_odd)
-        X.slip_odd, slipLambda = stats.boxcox(X.slip_odd)
+        df.bet_odd = (betBox-betBox.min())/np.ptp(betBox)
+        df.slip_odd = (slipBox-slipBox.min())/np.ptp(slipBox)
 
-        # zscore
-        # ------
-        for col in X.columns:
-            if ( X[col].dtype != 'object' ):
-                X[col] = stats.zscore( X[col] )
+        # calculate means ( player_id x bet_type )
+        # ----------------------------------------
+        X = df.groupby(['player_id', 'bet_type']).mean()
+        X = X.reset_index('bet_type')
 
-        # prince
-        # ------
-        famd = prince.FAMD(
-            n_components=X.columns.size,
-            n_iter=3,
-            copy=True,
-            check_input=True,
-            engine='auto',
-        )
+        # Shannon's index
+        # ---------------
+        def calcH(df):
+            _, n = np.unique( df.codes, return_counts=True )
+            p = n/n.sum()
+            return -np.sum(p*np.log(p))
+
+        H = df[['player_id', 'sport']].copy().set_index('player_id')
+        H.sport = pd.Categorical(H.sport)
+        H['codes'] = H.sport.cat.codes
+        H = H.groupby('player_id').apply(calcH)
+        X['H_index'] = X.index.to_series().map(H.to_dict())
+
+        # prince & kmeans
+        # ---------------
+        famd = prince.FAMD(n_components=4, random_state=42)
         famd = famd.fit(X)
 
-        # group
-        # -----
+        Xrc = famd.row_coordinates(X)
+        kmeans = KMeans(n_clusters=3, random_state=42)
+        kmeans = kmeans.fit(Xrc)
 
-        # plot correlation & inertia contribution
-        # ---------------------------------------
+        # plot famd
+        # ---------
         fig = plt.figure(figsize=(8, 4))
 
         r2 = famd.column_correlations(X)
         inert = famd.explained_inertia_*100
 
         plt.subplot(121)
-        u = r2[0]
-        v = r2[1]
-        plt.quiver(u*0, v*0, u, v, angles='xy', scale_units='xy', scale=1, width=3e-3, headwidth=7)
-        for i, t in enumerate(r2.index):
-            plt.text(u[i], v[i], t)
+        for t, r in r2.iterrows():
+            plt.plot([0, r[0]], [0, r[1]], 'k', linewidth=0.7)
+            plt.plot(r[0], r[1], 'ko', markersize=4)
+            plt.text(r[0], r[1], t)
 
-        plt.xlim(-1, 1)
-        plt.ylim(-1, 1)
-        plt.xticks(np.arange(-1, 1.1, 0.5))
-        plt.yticks(np.arange(-1, 1.1, 0.5))
-        plt.grid(True, axis='both', alpha=0.5, linestyle='--')
+        plt.title('Variable correlation')
         plt.xlabel('Component 0 ( %0.2f %% )' % (inert[0]))
         plt.ylabel('Component 1 ( %0.2f %% )' % (inert[1]))
-        plt.title('Variable correlation')
+        plt.grid(True, axis='both', alpha=0.5, linestyle='--')
+        plt.xticks(np.arange(-1, 1.1, .5))
+        plt.yticks(np.arange(-1, 1.1, .5))
 
         plt.subplot(122)
         plt.bar(np.arange(inert.size), inert)
@@ -501,9 +499,8 @@ class task:
         plt.savefig('./famd.png')
         plt.close()
 
-        # return
-        # ------
-        return famd, X
+        # plot kmeans
+        # -----------
 
 def main():
 
@@ -516,9 +513,9 @@ def main():
     # t.plotNoot()
     # t.plotHourPlayers()
     # t.plotLive(nBoot=nBoot)
-    famd, X = t.plotGroups()
+    t.plotGroups()
 
-    return t, famd, X
+    return t
 
 if __name__ == '__main__':
-    t, famd, X = main()
+    t = main()
