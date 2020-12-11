@@ -501,12 +501,45 @@ class task:
 
         # plot kmeans
         # -----------
+        l = kmeans.labels_
+        rc = famd.row_coordinates(X)
+        x = rc[0]
+        y = rc[1]
+
+        n = 30
+        xb = np.linspace(-3, 3, n-1)
+        yb = np.linspace(-4, 4, n)
+        zb = [ np.histogram2d( x[l==i], y[l==i], bins=(xb, yb) )[0] for i in range(3) ]
+        xb, yb = np.meshgrid( (xb[:-1]+xb[1:])/2, (yb[:-1]+yb[1:])/2 )
+
+        nlev = 8
+        colors = [ plt.cm.Blues, plt.cm.Oranges, plt.cm.Greens ]
+        for z, c in zip(zb, colors):
+            plt.contour(
+                xb, yb, z.T,
+                levels=np.linspace(2, z.max(), nlev),
+                colors=c(np.linspace(0, 1, nlev)),
+            )
+
+        for i, (x, y) in enumerate(kmeans.cluster_centers_[:, :2]):
+            plt.plot( x, y, 'd', markersize=7)
+
+        plt.grid(True, linestyle='--', alpha=0.5)
+        plt.title('K-means clusters')
+        plt.xlabel('Component 0')
+        plt.ylabel('Component 1')
+        plt.xlim(-2, 3)
+        plt.ylim(-2, 3)
+
+        plt.tight_layout()
+        plt.savefig('./kmeans.png')
+        plt.close()
 
 def main():
 
     plt.clf()
     nBoot = 100
-    skiprows = True
+    skiprows = False
 
     t = task(skiprows=skiprows)
     # t.plotSport()
