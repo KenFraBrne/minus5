@@ -434,13 +434,10 @@ class task:
 
         # boxcox & scale odds
         # -------------------
-        betBox, _ = stats.boxcox( df.bet_odd )
-        slipBox, _ = stats.boxcox( df.slip_odd )
+        df.bet_odd, _ = stats.boxcox( df.bet_odd )
+        df.slip_odd, _ = stats.boxcox( df.slip_odd )
 
-        df.bet_odd = (betBox-betBox.min())/np.ptp(betBox)
-        df.slip_odd = (slipBox-slipBox.min())/np.ptp(slipBox)
-
-        # calculate means ( player_id x bet_type )
+        # calculate ( player_id x bet_type ) means
         # ----------------------------------------
         X = df.groupby(['player_id', 'bet_type']).mean()
         X = X.reset_index('bet_type')
@@ -451,56 +448,85 @@ class task:
             _, n = np.unique( df.codes, return_counts=True )
             p = n/n.sum()
             return -np.sum(p*np.log(p))
-
         H = df[['player_id', 'sport']].copy().set_index('player_id')
         H.sport = pd.Categorical(H.sport)
         H['codes'] = H.sport.cat.codes
         H = H.groupby('player_id').apply(calcH)
+        H = (H-H.min())/np.ptp(H)
         X['H_index'] = X.index.to_series().map(H.to_dict())
+
+        # scale floats between 0 and 1
+        # ----------------------------
+        for c, v in X.iteritems():
+            if ( v.dtype == 'float64' ):
+                X[c] = (v-v.min())/np.ptp(v)
 
         # prince & kmeans
         # ---------------
+        Xfit = X[ X.H_index > 0 ]
+
         famd = prince.FAMD(n_components=4, random_state=42)
         famd = famd.fit(X)
+
+        inrt = famd.explained_inertia_*100
+        corr = famd.column_correlations(X)
 
         Xrc = famd.row_coordinates(X)
         kmeans = KMeans(n_clusters=3, random_state=42)
         kmeans = kmeans.fit(Xrc)
 
+        print('\n           corr')
+        print('-----------------------------------')
+        for t, v in corr.iterrows():
+            print('%-20s' % t + ' %5.2f'*v.size % tuple(v))
+
+        print('\n           corr**2')
+        print('-----------------------------------')
+        for t, v in corr.iterrows():
+            print('%-20s' % t + ' %5.2f'*v.size % tuple(v**2))
+
+        print('\n           inertia')
+        print('-----------------------------------')
+        for iv in enumerate(inrt):
+            print('Component %d  %5.2f' % iv)
+
         # plot famd
         # ---------
-        fig = plt.figure(figsize=(8, 4))
-
-        r2 = famd.column_correlations(X)
-        inert = famd.explained_inertia_*100
+        plt.figure(figsize=(8, 4))
 
         plt.subplot(121)
-        for t, r in r2.iterrows():
-            plt.plot([0, r[0]], [0, r[1]], 'k', linewidth=0.7)
-            plt.plot(r[0], r[1], 'ko', markersize=4)
-            plt.text(r[0], r[1], t)
+        for t, r in corr.iterrows():
+            plt.plot([0, r[0]], [0, r[2]], 'k', linewidth=0.7)
+            plt.plot(r[0], r[2], 'ko', markersize=4)
+            plt.text(r[0], r[2], t)
 
         plt.title('Variable correlation')
-        plt.xlabel('Component 0 ( %0.2f %% )' % (inert[0]))
-        plt.ylabel('Component 1 ( %0.2f %% )' % (inert[1]))
+        plt.xlabel('Component 0 ( %0.2f %% )' % (inrt[0]))
+        plt.ylabel('Component 2 ( %0.2f %% )' % (inrt[2]))
         plt.grid(True, axis='both', alpha=0.5, linestyle='--')
         plt.xticks(np.arange(-1, 1.1, .5))
         plt.yticks(np.arange(-1, 1.1, .5))
 
+        # plot inertia
+        # ------------
         plt.subplot(122)
-        plt.bar(np.arange(inert.size), inert)
+        plt.bar(np.arange(inrt.size), inrt)
 
-        plt.xticks(np.arange(inert.size))
+        plt.xticks(np.arange(inrt.size))
         plt.title('Inertia explained')
         plt.xlabel('Component')
         plt.ylabel('%')
 
+        # print famd & inertia
+        # --------------------
         plt.tight_layout()
         plt.savefig('./famd.png')
         plt.close()
 
         # plot kmeans
         # -----------
+        plt.figure(figsize=(8, 4))
+
         l = kmeans.labels_
         rc = famd.row_coordinates(X)
         x = rc[0]
@@ -514,6 +540,8 @@ class task:
 
         nlev = 8
         colors = [ plt.cm.Blues, plt.cm.Oranges, plt.cm.Greens ]
+
+        plt.subplot(121)
         for z, c in zip(zb, colors):
             plt.contour(
                 xb, yb, z.T,
@@ -531,6 +559,27 @@ class task:
         plt.xlim(-2, 3)
         plt.ylim(-2, 3)
 
+        # plot bets by category
+        # ---------------------
+        nh = 30
+        xh = np.linspace(0, 1, nh)
+
+        plt.subplot(122)
+        for i in range(3):
+            yh, _ = np.histogram( X.bet_odd[ l == i ], xh, density=True )
+            plt.step(xh[1:], yh)
+
+        plt.xticks(np.arange(0, 1.1, 1/4))
+        plt.yticks(np.arange(0, 4.1))
+        plt.grid(True, linestyle='--', alpha=0.5)
+        plt.title('bet_odd PDF')
+        plt.xlabel('bet_odd ( boxcox & scaled )')
+        plt.ylabel('PDF')
+        plt.xlim(0, 1)
+        plt.ylim(0, 4)
+
+        # print kmeans & labeled bets
+        # ---------------------------
         plt.tight_layout()
         plt.savefig('./kmeans.png')
         plt.close()
@@ -546,7 +595,7 @@ def main():
     # t.plotNoot()
     # t.plotHourPlayers()
     # t.plotLive(nBoot=nBoot)
-    t.plotGroups()
+    # t.plotGroups()
 
     return t
 
