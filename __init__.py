@@ -58,29 +58,29 @@ class task:
 
     def plotSport(self):
 
-        # get unique sport counts
-        # -----------------------
-        sport, count = np.unique(self.df.sport, return_counts=True)
+        # bet counts by sport
+        # -------------------
+        count = self.df.groupby('sport').apply(len)
         frac = count/count.sum()*100
-        ind = np.argsort(frac)
+        frac = frac.sort_values(ascending=False)
 
         # print percentages to screen
         # ---------------------------
-        print('\n   sport percentages    ')
-        print('------------------------')
-        for i in ind[::-1]:
-            print("%-20s  %5.2f %%" % (sport[i], frac[i]))
+        print('\n   bet fraction    ')
+        print('--------------------')
+        for sv in frac.iteritems():
+            print("%-20s  %5.2f %%" % sv)
 
         # plot
         # ----
-        y = np.arange(sport.size)
-        plt.barh(y, frac[ind])
+        y = np.arange(frac.size, 0, -1)
+        plt.barh(y, frac)
 
         plt.grid(True, axis='x')
         plt.title('Fraction of total bets by sport')
         plt.xlabel('Fraction [%]')
         plt.xticks(np.arange(0, 101, 25))
-        plt.yticks(y, sport[ind])
+        plt.yticks(y, frac.index.values)
         plt.ylim(y.mean()+2, y.max()+1)
         plt.xlim(0, 100)
 
@@ -520,7 +520,7 @@ class task:
         # print famd & inertia
         # --------------------
         plt.tight_layout()
-        plt.savefig('./famd.png')
+        plt.savefig(self.plotPath + 'famd.png')
         plt.close()
 
         # plot kmeans
@@ -581,17 +581,17 @@ class task:
         # print kmeans & labeled bets
         # ---------------------------
         plt.tight_layout()
-        plt.savefig('./kmeans.png')
+        plt.savefig(self.plotPath + 'kmeans.png')
         plt.close()
 
 def main():
 
     plt.clf()
     nBoot = 100
-    skiprows = False
+    skiprows = True
 
     t = task(skiprows=skiprows)
-    # t.plotSport()
+    t.plotSport()
     # t.plotNoot()
     # t.plotHourPlayers()
     # t.plotLive(nBoot=nBoot)
