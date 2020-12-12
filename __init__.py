@@ -13,9 +13,11 @@ np.warnings.filterwarnings('error', category=np.VisibleDeprecationWarning)
 
 class task:
 
-    def __init__(self, skiprows=False):
+    def __init__(self, skiprows=False, printResults=False):
         self.loadData(skiprows)
         self.mkdirPlots()
+        if (printResults):
+            sys.stdout = open('./results.txt', 'w')
 
     def loadData(self, skiprows):
         rows = np.arange(1, 1051576, 2) if skiprows else None
@@ -127,109 +129,50 @@ class task:
         plt.savefig(self.plotPath + 'noot.png')
         plt.close()
 
-    def plotHourBets(self):
+    def plotHours(self):
 
-        # prepare
-        # -------
-        sports = np.unique(self.df.sport)
-        date = pd.DatetimeIndex(self.df.date)
-        hour = date.hour
-
-        # get hour data per sport
-        # -----------------------
-        sportHours = np.array([hour[self.df.sport == sport]
-                               for sport in sports])
-        bins = np.arange(24)
-        hourHists = np.array([np.histogram(hours, bins)
-                              for hours in sportHours])
-        hourCounts, _ = zip(*hourHists)
-        hourCounts = np.array(hourCounts)
-        hourMax = np.argmax(hourCounts, axis=1)
-
-        # print mean betting hour per sport
-        # ---------------------------------
-        for i, sport in enumerate(sports):
-            print('Max betting hour for %-20s: %d' % (sport, hourMax[i]))
-
-        # plot
-        # ----
-        i = np.argsort(hourMax)
-        y = np.arange(sports.size)+1
-
-        plt.boxplot(sportHours[i], sym='', vert=False)
-        h = plt.plot(hourMax[i], y, 'ro')
-
-        plt.legend( h, ['Max. bet hour'], fontsize='x-large', framealpha=1 )
-        plt.title('Bets per hour')
-        plt.xlabel('Time of day [hour]')
-        plt.xlim(0, 24)
-        plt.xticks(np.arange(0, 25, 6))
-        plt.yticks(y, sports[i])
-
-        # print
+        # hours
         # -----
-        plt.tight_layout()
-        plt.savefig(self.plotPath + 'hourBets.png')
-        plt.close()
+        hours = self.df[['sport', 'date', 'player_id']].copy()
+        hours['hour'] = pd.DatetimeIndex(hours.date).hour
+        hours = hours.drop('date', 1).drop_duplicates().drop('player_id', 1)
+        hours = hours.set_index('sport')
 
-    def plotHourPlayers(self):
-
-        # prepare
+        # hourMax
         # -------
-        sport = self.df.sport
-        sports, sportInd = np.unique(sport, return_inverse=True)
-
-        player_id = self.df.player_id
-        nPlayer = np.unique(player_id).size
-
-        date = pd.DatetimeIndex(self.df.date)
-        hour = date.hour
-
-        # unique (sport, hour, player) combinations to remove multiple bets
-        # -----------------------------------------------------------------
-        array = np.vstack((sportInd, hour, player_id)).T
-        shp = np.unique(array, axis=0)
-        s = shp[:,0]
-        h = shp[:,1]
-
-        # sportHours
-        # ----------
-        bins = np.arange(24)
-        sportHours = np.array( [ h[ s == sVal ] for sVal in np.unique(s) ], dtype=object )
-        ret = [ np.histogram( sHours, bins ) for sHours in sportHours ]
-        playerCounts, _ = zip(*ret)
-        playerCounts = np.array(playerCounts)
-        playerMax = np.max(playerCounts, axis=1)
-        playerArgmax = np.argmax(playerCounts, axis=1)
-        ind = np.argsort(playerMax)
+        f = lambda df: np.bincount(df.hour).argmax()
+        hourMax = hours.groupby('sport').apply(f)
+        hourNum = hours.groupby('sport').count()
 
         # print max betting count per sport
         # ---------------------------------
-        print('\n    max player number    ')
-        print('-------------------------')
-        for i in ind[::-1]:
-            print('%-20s  %5.2f %%  %2d h' % (sports[i], playerMax[i]/nPlayer*100, playerArgmax[i]))
+        print('\n    max player hour    ')
+        print('------------------------')
+        for s, h in hourMax.iteritems():
+            print('%-20s  %7d  %2d h - %2d h' % ( s, hourNum.loc[s], h, h+1 ))
 
         # plot
         # ----
-        i = np.argsort(playerArgmax)
-        y = np.arange(sports.size)
+        i = hourMax.argsort()
+        y = np.arange(hourMax.size)
+        s = hourMax.index.values[i]
 
-        hp = plt.plot(playerArgmax[i], y+1, 'd', markersize=7, color='red')
-        hb = plt.boxplot(sportHours[i], vert=False, widths=0.4, flierprops={ 'markersize' : 2 })
+        hp = plt.plot(hourMax[i], y+1, 'd', markersize=7, color='red')
+        for i, ss in enumerate( hourMax.index.values[i] ):
+            hb = plt.boxplot(hours.loc[ss], positions=[i+1], vert=False, widths=0.4, flierprops={ 'markersize' : 2 } )
 
         plt.title('Players per hour')
         plt.legend( [hp[0], hb['fliers'][0]], ['Max. player/hour', 'outliers'], framealpha=1, loc='upper left')
         plt.grid(True, axis='both', alpha=0.5, linestyle='--')
         plt.xlabel('Time of day [hour]')
         plt.xticks(np.arange(0, 25, 6))
-        plt.yticks(y+1, sports[i])
-        # plt.xlim(-0.5, 24)
+        plt.yticks(y+1, s)
+        plt.xlim(-0.5, 24)
 
         # print
         # -----
         plt.tight_layout()
-        plt.savefig(self.plotPath + 'hourPlayers.png')
+        plt.savefig(self.plotPath + 'hours.png')
         plt.close()
 
     def plotLive(self, nBoot=100):
@@ -568,11 +511,12 @@ def main():
     plt.clf()
     nBoot = 100
     skiprows = True
+    printResults = False
 
-    t = task(skiprows=skiprows)
-    t.plotSport()
-    t.plotNoot()
-    # t.plotHourPlayers()
+    t = task(skiprows=skiprows, printResults=printResults)
+    # t.plotSport()
+    # t.plotNoot()
+    t.plotHours()
     # t.plotLive(nBoot=nBoot)
     # t.plotGroups()
 
