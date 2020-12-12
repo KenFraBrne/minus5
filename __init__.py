@@ -92,45 +92,24 @@ class task:
 
     def plotNoot(self):
 
-        # prepare
-        # -------
-        df = self.df
-        player_id = df.player_id
-        foot = df.sport == 'nogomet'
-        array = np.vstack((player_id, foot)).T
+        # noot
+        # ----
+        noot = self.df[[ 'player_id', 'sport' ]].set_index('player_id')
+        nootCalc = lambda sport: (sport == 'nogomet').sum()/sport.size*100
+        noot = noot.groupby('player_id').apply(nootCalc)
+        noot = noot.sort_values('sport').reset_index().sport
 
-        # non foot bet count (where applicable)
-        # -------------------------------------
-        nootPlayer, nootCount = np.unique(array, axis=0, return_counts=True)
-        i = nootPlayer[:, 1] != 1
-        nootPlayer = nootPlayer[i, 0]
-        nootCount = nootCount[i]
-
-        # total bet count (where applicable)
-        # ----------------------------------
-        player, betCount = np.unique(player_id, return_counts=True)
-        i = np.in1d(player, nootPlayer)
-        player = player[i]
-        betCount = betCount[i]
-
-        # non foot fractions
-        # ------------------
-        nPlayer = player_id.unique().size
-        frac = np.hstack((np.zeros(nPlayer - nootPlayer.size), nootCount/betCount))
-        frac = 100 - np.sort(frac)*100
-        frac = frac[::-1]
-
-        # print count & fraction of noot players
-        # --------------------------------------
-        i = np.argmin(abs(73 - frac))
-        print('\nNumber of noot players: %d [ %d%% ]' % (i, i/nPlayer*100))
+        # print noot fraction
+        # -------------------
+        i = np.argmin(abs(noot-73.01))
+        print('\nNumber of noot players: %d [ %d%% ]' % (i, i/noot.size*100))
         print('------------------------------------')
 
         # plot
         # ----
-        plt.plot(frac, np.arange(nPlayer), linewidth=2)
-        plt.plot([0, frac[i]], np.repeat(i, 2), 'r--')
-        plt.plot(np.repeat(frac[i], 2), [0, i], 'r--')
+        plt.plot(noot, np.arange(noot.size), linewidth=2)
+        plt.plot([0, noot[i]], np.repeat(i, 2), 'r--')
+        plt.plot(np.repeat(noot[i], 2), [0, i], 'r--')
 
         plt.grid(True, axis='both')
         plt.legend(['$ bet_{nogomet|player} $', '$ bet_{nogomet|total} $', ])
@@ -138,8 +117,8 @@ class task:
         plt.yticks(np.arange(0, 3e4, 5e3))
         plt.xticks(np.arange(0, 101, 25))
         plt.ylabel('Player number [-]')
-        plt.xlabel('Fraction [%]')
-        plt.ylim(0, nPlayer)
+        plt.xlabel('Fraction of nogomet bets [%]')
+        plt.ylim(0, noot.size)
         plt.xlim(0, 100)
 
         # print & close
@@ -592,7 +571,7 @@ def main():
 
     t = task(skiprows=skiprows)
     t.plotSport()
-    # t.plotNoot()
+    t.plotNoot()
     # t.plotHourPlayers()
     # t.plotLive(nBoot=nBoot)
     # t.plotGroups()
