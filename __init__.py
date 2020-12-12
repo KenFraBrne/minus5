@@ -175,114 +175,97 @@ class task:
         plt.savefig(self.plotPath + 'hours.png')
         plt.close()
 
-    def plotLive(self, nBoot=100):
+    def plotLive(self, nboot=100):
 
-        # prepare
-        # -------
-        bets = self.df.bet_odd
-        live = self.df.bet_type == 'live'
-        sport = self.df.sport
-        sports, sportInd = np.unique( sport, return_inverse=True )
+        # bets
+        # ----
+        bets = self.df[['bet_type', 'sport', 'bet_odd']].copy()
+        bets = bets.set_index([ 'bet_type', 'sport' ])
+        bets = bets.sort_index()
+        bets['log10'] = np.log10(bets.bet_odd)
 
-        X = np.vstack((live, sportInd)).T
-        X, Xinv = np.unique(X, axis=0, return_inverse=True)
-        Y = [ bets[Xinv == inv] for inv in np.unique(Xinv) ]
-        Ylog10 = np.array([ np.log10(y) for y in Y ], dtype=object)
-
-        # bootstrap means (with loops because of memory)
-        # ----------------------------------------------
-        row = np.zeros(nBoot)
-        Yboot = np.zeros((Ylog10.size, nBoot))
-        iq = (nBoot*np.array([5e-1, 5e-2, 95e-2])).astype('int')
-
-        print('\n     bootstrap means ( %d samples )     ' % nBoot)
-        print('---------------------------------------------')
-        for i in range(Yboot.shape[0]):
-            for j in range(Yboot.shape[1]):
-                row[j] = np.random.choice( Ylog10[i], Ylog10[i].size ).mean()
-            Yboot[i] = np.sort(row)
-
-            # print
-            # -----
-            output = (i, X[i, 1], sports[X[i, 1]],)
-            output += ('live' if X[i, 0] else 'prematch',)
-            output += tuple(Yboot[i][iq])
-            print('%2d  %2d  %-20s %10s   %5.3f   ( %5.3f - %5.3f )' % output)
-
-        # histograms
+        # stat tests
         # ----------
-        nbin = 30
-        bins = np.arange(0, 1+2/nbin, 1/nbin)
+        def fun(df):
+            l = df.index.unique()
+            d = df.bet_odd
+            [ ks, ks_p, wx, wx_p ] = [ np.nan ] * 4
+            if (l.size > 1):
+                o = d.loc['live']
+                m = d.loc['prematch']
+                ks, ks_p = stats.ks_2samp(o, m, alternative='greater')
+                wx, wx_p = stats.ranksums(o, m)
+            return pd.DataFrame({
+                'ks' : ks,
+                'wx' : wx,
+                'ks_p' : ks_p,
+                'wx_p' : wx_p,
+            }, index=[0])
 
-        Yhist = np.array([ np.histogram(y, bins)[0] for y in Ylog10 ], dtype=object)
-        Yhist = Yhist/Yhist.sum(1, keepdims=True)
+        tests = bets.groupby('sport').apply(fun).droplevel(1)
 
-        # test 'live' differences
-        # -----------------------
-        print('\n     ks test results     ')
-        print('------------------------------------')
+        print('\n' + ' '*22 + 'test results')
+        print('-'*62)
+        print(' '*32 + '%-18s' % 'ks test' + 'wx test')
+        for s, r in tests.iterrows():
+            print('%-30s %5.2f ( %4.2f )    %5.2f ( %4.2f )' % (s, r.ks, r.ks_p, r.wx, r.wx_p))
 
-        ksResult = np.full((sports.size, 2), np.nan)
-        for iSport in range(sports.size):
+        # bootstrap log10 means (with loops due to memory)
+        # ------------------------------------------------
+        def fun(df):
+            mu = np.zeros(nboot)
+            for i in range(nboot):
+                mu[i] = np.random.choice( df.log10, df.log10.size ).mean()
+            mu = np.sort(mu)
+            return pd.Series(mu)
 
-            # calc
-            # ----
-            i = X[:,1] == iSport
-            y = [ a for a, b in zip(Ylog10, i) if b ]
-            if (len(y) > 1):
-                yo = y[0]
-                ym = y[1]
-                score, pvalue = stats.ks_2samp(ym, yo, 'greater')
-                ksResult[iSport] = [score, pvalue]
+        boot = bets.groupby(['bet_type', 'sport']).apply(fun)
 
-            # print
-            # -----
-            output = (sports[iSport],) + tuple(ksResult[iSport])
-            print('%-20s %5.2f (%5.2f)' % output)
+        print('\n     bootstrap means ( %d samples )     ' % nboot)
+        print('---------------------------------------------')
+        iq = ( np.array([0.5, 0.025, 0.975])*nboot ).astype('int')
+        for (l, s), b in boot.iterrows():
+            out = (s, l,) + tuple(b[iq])
+            print(' %-20s %-10s %5.3f (%5.3f-%5.3f)' % out)
 
-        # remap old sport categories (sold) based on the mean
-        # ---------------------------------------------------
-        sold = X[:, 1]
-        mean = Yboot[:, nBoot//2]
-        _, i = np.unique( sold, return_index=True )
-        j = mean[i].argsort()
-        cnew = sold[i][j].tolist()
-        X[:, 1] = np.array([ cnew.index(cold) for cold in sold ])
-        ksResult = ksResult[cnew]
-        sports = sports[cnew]
+        # reorder categories by bootstrap mean
+        # ----------------------
+        cnew = boot.iloc[:, iq[0]]
+        cnew = cnew.sort_values().reset_index()
+        cnew = cnew.drop_duplicates('sport').reset_index()
 
         # plot bootstraped means
         # ----------------------
-        xl = X[:, 0]
-        xs = X[:, 1]
-        ys = Yboot[:]
+        colorFun = lambda bet_type : 'C1' if bet_type == 'live' else 'C0'
 
-        _, indTick = np.unique( xs, return_index=True )
-        xt = xs[indTick]
-        tt = sports[xt]
-
-        for i, (x, y) in enumerate(zip(xs, ys)):
-            color = 'C1' if xl[i] else 'C0'
-            colorDict = { 'color' : color }
+        for (l, s), v in boot.iterrows():
+            colorDict = { 'color' : colorFun(l) }
             props = {
                 'vert' : False,
-                'widths' : 0.25,
-                'boxprops' : { **colorDict },
+                'widths' : 0.3,
+                'patch_artist': True,
+                'boxprops' : { **colorDict, 'facecolor' : colorFun(l) },
                 'capprops' : { **colorDict },
                 'medianprops' : { **colorDict },
                 'whiskerprops' : { **colorDict },
-                'flierprops' : { 'marker' : '.', 'markersize' : 3, 'markerfacecolor' : color, 'markeredgecolor' : color, },
+                'flierprops' : {
+                    'marker' : '.',
+                    'markersize' : 3,
+                    'markerfacecolor' : colorFun(l),
+                    'markeredgecolor' : colorFun(l),
+                },
             }
-            plt.boxplot(y, positions=[x], **props)
+            y = cnew[cnew.sport == s].index.values
+            plt.boxplot(v, positions=y, **props)
 
-        plt.yticks(xt, tt)
         plt.xlabel('$log_{10}$(bet_odd)')
         plt.xticks(np.arange(0, 0.81, 0.2))
-        plt.title('bootstrapped mean ( %d samples )' % nBoot)
+        plt.yticks(np.arange(cnew.sport.size), cnew.sport)
+        plt.title('bootstrapped mean ( %d samples )' % nboot)
         plt.grid(True, axis='both', alpha=0.5, linestyle='--')
 
         hl = plt.gca().lines
-        plt.legend([hl[0], hl[-3]], ['prematch', 'live'])
+        plt.legend([hl[0], hl[-3]], ['live', 'prematch'])
 
         plt.tight_layout()
         plt.savefig(self.plotPath + 'live.png')
@@ -290,33 +273,27 @@ class task:
 
         # plot distributions
         # ------------------
-        for iSport in range(sports.size):
+        bins = np.linspace(0, 1, 30)
+        for s, df in bets.groupby('sport'):
+            df = df.droplevel('sport').log10
 
             # prepare
             # -------
             fig = plt.figure(figsize=(8, 4))
-            i = X[:,1] == iSport
-            isLive = X[i][:,0]
+            groups = df.index.unique()
+            hist = [ np.histogram( df.loc[g], bins )[0]/df.loc[g].size for g in groups ]
+            xcdf = [ np.sort(df.loc[g]) for g in groups ]
+            ycdf = [ np.linspace(0, 1, x.size) for x in xcdf ]
 
             # plot hist
             # ---------
             plt.subplot(121)
-
-            hp = plt.step(bins[:-1], Yhist[i].T)
-
-            if ( isLive.size > 1 ):
-                plt.legend(['prematch', 'live'])
-            else:
-                if ( isLive == 1 ):
-                    hp[0].set_color('C1')
-                    plt.legend([ 'live' ])
-                else:
-                    hp[0].set_color('C0')
-                    plt.legend([ 'prematch' ])
-
-            plt.title("%s" % sports[iSport])
+            for i, h in enumerate(hist):
+                plt.step(bins[1:], h, where='post', color=colorFun(groups[i]))
+            plt.legend(groups)
+            plt.title("%s" % s)
             plt.xlabel('$log_{10}$(bet_odd)')
-            plt.ylabel('rel. frequency')
+            plt.ylabel('Relative frequency')
             plt.xlim(0, 1)
             plt.ylim(0, 0.4)
             plt.xticks(np.arange(0, 1.1, .25))
@@ -325,15 +302,9 @@ class task:
             # plot cdf
             # --------
             plt.subplot(122)
-            xp = [ np.sort(y) for y in Ylog10[i] ]
-            yp = [ np.linspace(0, 1, x.size) for x in xp ]
-            for x, y in zip(xp, yp):
-                hp = plt.plot(x, y)
-
-            if ( isLive[0] == 1 ):
-                hp[0].set_color('C1')
-
-            plt.title("%s" % sports[iSport])
+            for i, (x, y) in enumerate(zip(xcdf, ycdf)):
+                plt.plot(x, y, color=colorFun(groups[i]))
+            plt.title("%s" % s)
             plt.xlabel('$log_{10}$(bet_odd)')
             plt.ylabel('CDF')
             plt.xlim(0, 1)
@@ -344,7 +315,7 @@ class task:
             # print
             # -----
             plt.tight_layout()
-            fig.savefig(self.plotPath + 'live_%s.png' % sports[iSport].replace(' ', '_'))
+            fig.savefig(self.plotPath + 'live_%s.png' % s.replace(' ', '_'))
             plt.clf()
 
     def plotGroups(self):
@@ -509,16 +480,16 @@ class task:
 def main():
 
     plt.clf()
-    nBoot = 100
-    skiprows = True
-    printResults = False
+    nboot = 10000
+    skiprows = False
+    printResults = True
 
     t = task(skiprows=skiprows, printResults=printResults)
-    # t.plotSport()
-    # t.plotNoot()
+    t.plotSport()
+    t.plotNoot()
     t.plotHours()
-    # t.plotLive(nBoot=nBoot)
-    # t.plotGroups()
+    t.plotLive(nboot=nboot)
+    t.plotGroups()
 
     return t
 
