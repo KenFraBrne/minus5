@@ -89,7 +89,7 @@ class task:
         # print & close
         # -------------
         plt.tight_layout()
-        plt.savefig(self.plotPath + 'sport.png')
+        plt.savefig(self.plotPath + 'sport.pdf')
         plt.close()
 
     def plotNoot(self):
@@ -126,7 +126,7 @@ class task:
         # print & close
         # -------------
         plt.tight_layout()
-        plt.savefig(self.plotPath + 'noot.png')
+        plt.savefig(self.plotPath + 'noot.pdf')
         plt.close()
 
     def plotHours(self):
@@ -172,7 +172,7 @@ class task:
         # print
         # -----
         plt.tight_layout()
-        plt.savefig(self.plotPath + 'hours.png')
+        plt.savefig(self.plotPath + 'hours.pdf')
         plt.close()
 
     def plotLive(self, nboot=100):
@@ -268,7 +268,7 @@ class task:
         plt.legend([hl[0], hl[-3]], ['live', 'prematch'])
 
         plt.tight_layout()
-        plt.savefig(self.plotPath + 'live.png')
+        plt.savefig(self.plotPath + 'live.pdf')
         plt.clf()
 
         # plot distributions
@@ -315,7 +315,7 @@ class task:
             # print
             # -----
             plt.tight_layout()
-            fig.savefig(self.plotPath + 'live_%s.png' % s.replace(' ', '_'))
+            fig.savefig(self.plotPath + 'live_%s.pdf' % s.replace(' ', '_'))
             plt.clf()
 
     def plotGroups(self):
@@ -413,7 +413,7 @@ class task:
         # print famd & inertia
         # --------------------
         plt.tight_layout()
-        plt.savefig(self.plotPath + 'famd.png')
+        plt.savefig(self.plotPath + 'famd.pdf')
         plt.close()
 
         # plot kmeans
@@ -474,7 +474,7 @@ class task:
         # print kmeans & labeled bets
         # ---------------------------
         plt.tight_layout()
-        plt.savefig(self.plotPath + 'kmeans.png')
+        plt.savefig(self.plotPath + 'kmeans.pdf')
         plt.close()
 
 def main():
