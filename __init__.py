@@ -63,18 +63,18 @@ class task:
         # bet counts by sport
         # -------------------
         count = self.df.groupby('sport').apply(len)
-        frac = count/count.sum()*100
-        frac = frac.sort_values(ascending=False)
+        count = count.sort_values(ascending=False)
 
         # print percentages to screen
         # ---------------------------
         print('\n   bet fraction    ')
         print('--------------------')
-        for sv in frac.iteritems():
-            print("%-20s  %5.2f %%" % sv)
+        for s, v in count.iteritems():
+            print("%-20s  %6.3f %% ( %d )" % (s, v/count.sum()*100, v))
 
         # plot
         # ----
+        frac = count/count.sum()*100
         y = np.arange(frac.size, 0, -1)
         plt.barh(y, frac)
 
@@ -138,35 +138,38 @@ class task:
         hours = hours.drop('date', 1).drop_duplicates().drop('player_id', 1)
         hours = hours.set_index('sport')
 
-        # hourMax
-        # -------
-        f = lambda df: np.bincount(df.hour).argmax()
-        hourMax = hours.groupby('sport').apply(f)
-        hourNum = hours.groupby('sport').count()
+        # hourHist
+        # --------
+        f = lambda df: pd.Series( np.histogram( df.hour, np.arange(24) )[0] )
+        hourHist = hours.groupby('sport').apply(f)
+
+        i = hourHist.idxmax(1).argsort()
+        hourHist = hourHist.iloc[i]
 
         # print max betting count per sport
         # ---------------------------------
         print('\n    max player hour    ')
         print('------------------------')
-        for s, h in hourMax.iteritems():
-            print('%-20s  %7d  %2d h - %2d h' % ( s, hourNum.loc[s], h, h+1 ))
+        for s, h in hourHist.iterrows():
+            c = h.max()
+            m = h.argmax()
+            f = c/h.sum()*100
+            print('%-20s %7d %7.0f %%   %2dh - %2dh' % ( s, c, f, m, m+1 ))
 
         # plot
         # ----
-        i = hourMax.argsort()
-        y = np.arange(hourMax.size)
-        s = hourMax.index.values[i]
+        y = np.arange(hourHist.shape[0])
 
-        hp = plt.plot(hourMax[i], y+1, 'd', markersize=7, color='red')
-        for i, ss in enumerate( hourMax.index.values[i] ):
-            hb = plt.boxplot(hours.loc[ss], positions=[i+1], vert=False, widths=0.4, flierprops={ 'markersize' : 2 } )
+        hp = plt.plot(hourHist.idxmax(1), y+1, 'd', markersize=7, color='red')
+        for i, s in enumerate( hourHist.index.values ):
+            hb = plt.boxplot(hours.loc[s], positions=[i+1], vert=False, widths=0.4, flierprops={ 'markersize' : 2 } )
 
         plt.title('Players per hour')
         plt.legend( [hp[0], hb['fliers'][0]], ['Max. player/hour', 'outliers'], framealpha=1, loc='upper left')
         plt.grid(True, axis='both', alpha=0.5, linestyle='--')
         plt.xlabel('Time of day [hour]')
         plt.xticks(np.arange(0, 25, 6))
-        plt.yticks(y+1, s)
+        plt.yticks(y+1, hourHist.index.values)
         plt.xlim(-0.5, 24)
 
         # print
@@ -356,8 +359,6 @@ class task:
 
         # prince & kmeans
         # ---------------
-        Xfit = X[ X.H_index > 0 ]
-
         famd = prince.FAMD(n_components=4, random_state=42)
         famd = famd.fit(X)
 
